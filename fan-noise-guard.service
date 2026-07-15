@@ -1,0 +1,22 @@
+[Unit]
+Description=fan-noise-guard: Dell PowerEdge R-family fan watchdog (manual IPMI fan control, temp-scaled)
+After=multi-user.target
+
+[Service]
+Type=simple
+# Elevated scheduling priority (lower/negative nice = higher priority) so the
+# watchdog keeps polling and can still issue IPMI fan commands promptly even
+# when the box is under heavy CPU/GPU load — that's exactly when temps rise
+# fastest and the watchdog matters most.
+Nice=-10
+ExecStart=/usr/local/sbin/fan-noise-guard.sh
+# Always hand fans back to iDRAC's automatic control if this service stops
+# or crashes for any reason, so a dead watchdog never leaves fans pinned
+# low on a passively-cooled GPU with nothing minding the temps.
+ExecStopPost=/usr/bin/ipmitool raw 0x30 0x30 0x01 0x01
+Restart=on-failure
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
