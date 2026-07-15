@@ -64,7 +64,14 @@ case "$FAN_PROFILE" in
   silent)
     # Quietest. Runs warmer within each tier before ramping — fine as long
     # as your components' actual thermal limits leave margin for it.
-    ENTER=(50 60 70 78)
+    #
+    # ENTER[0] widened from 50 to 53 (STATS_FILE data, 2026-07-15): once
+    # ambient conditions let tier0 (20%) actually get reached, the 45/50
+    # band was narrow enough that idle heat soak alone (~50W baseline draw)
+    # re-triggered escalation every ~2.5min, producing a steady ~9-10min
+    # limit cycle between 20%/30% — not unsafe, just needlessly audible.
+    # The wider band damps that cycle without changing anything else.
+    ENTER=(53 60 70 78)
     EXIT=(45 55 65 73)
     SPEEDS=(20 30 45 60 85)
     ;;
