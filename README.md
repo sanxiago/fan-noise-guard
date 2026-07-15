@@ -74,9 +74,37 @@ DRY_RUN=1 ./fan-noise-guard.sh
 
 In dry-run mode every fan command is logged instead of executed.
 
+## Profiles
+
+Set `FAN_PROFILE` to trade noise for thermal headroom. `PANIC_C` (the hard
+safety ceiling) is intentionally the same across all profiles — it's a
+hardware safety limit, not a comfort preference, so no profile can relax it.
+
+| Profile | Behavior |
+|---|---|
+| `silent` | Quietest. Tolerates running warmer within each tier before ramping up. |
+| `balanced` (default) | Middle ground; the values this project ships with. |
+| `performance` | Ramps sooner and harder to keep temps lower, at the cost of more fan noise even under light load. |
+
+```bash
+FAN_PROFILE=silent DRY_RUN=1 ./fan-noise-guard.sh   # try it without touching hardware
+```
+
+For the systemd service, set it via an environment file instead of editing
+the unit:
+
+```bash
+echo "FAN_PROFILE=silent" | sudo tee /etc/default/fan-noise-guard
+sudo systemctl restart fan-noise-guard.service
+```
+
+An unrecognized `FAN_PROFILE` value fails fast at startup with a clear error
+rather than silently falling back to a different profile.
+
 ## Tuning
 
-All of this lives at the top of `fan-noise-guard.sh`:
+Each profile's tiers live in `fan-noise-guard.sh`'s `case "$FAN_PROFILE"`
+block, alongside the other top-of-file settings:
 
 | Variable | Meaning |
 |---|---|
@@ -84,13 +112,13 @@ All of this lives at the top of `fan-noise-guard.sh`:
 | `READ_TIMEOUT` | Max seconds to wait on a sensor command before treating it as a failed read. |
 | `ENTER` / `EXIT` | Per-tier temperature thresholds (°C) for stepping fan speed up / back down. The gap between them is the hysteresis band — widen it if you still see chatter, narrow it for a snappier response. |
 | `SPEEDS` | Fan speed percentages corresponding to each tier. |
-| `PANIC_C` | Hard ceiling — at/above this, or on any failed read, the watchdog stops trusting itself and hands control to iDRAC. |
+| `PANIC_C` | Hard ceiling — at/above this, or on any failed read, the watchdog stops trusting itself and hands control to iDRAC. Shared across all profiles. |
 
-The defaults are conservative starting points, not a guarantee of safety for
-your specific hardware — check your components' actual thermal limits
-(`sensors` reports `high`/`crit` values for CPU packages; GPU vendors publish
-throttle/max operating temperatures) and set `PANIC_C` comfortably below
-them.
+The shipped values are conservative starting points, not a guarantee of
+safety for your specific hardware — check your components' actual thermal
+limits (`sensors` reports `high`/`crit` values for CPU packages; GPU vendors
+publish throttle/max operating temperatures) and set `PANIC_C` comfortably
+below them.
 
 ## Safety notes
 

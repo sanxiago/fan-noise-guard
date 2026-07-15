@@ -4,6 +4,10 @@ After=multi-user.target
 
 [Service]
 Type=simple
+# Optional: create /etc/default/fan-noise-guard with e.g. FAN_PROFILE=silent
+# to override the default "balanced" profile without editing this unit.
+# Leading "-" means a missing file is not an error.
+EnvironmentFile=-/etc/default/fan-noise-guard
 # Elevated scheduling priority (lower/negative nice = higher priority) so the
 # watchdog keeps polling and can still issue IPMI fan commands promptly even
 # when the box is under heavy CPU/GPU load — that's exactly when temps rise

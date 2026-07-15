@@ -42,10 +42,38 @@ DRY_RUN="${DRY_RUN:-0}"   # DRY_RUN=1 ./fan-noise-guard.sh: log decisions, never
 # from flapping between two speeds when temp is hovering right at a boundary
 # (e.g. bouncing between 44C and 45C), by requiring temp to fall well below
 # where it stepped up before stepping back down.
-ENTER=(45 55 65 75)
-EXIT=(40 50 60 70)     # 5C hysteresis band below each ENTER threshold
-SPEEDS=(30 40 55 70 90)
-PANIC_C=82   # hard ceiling: bail to automatic control and stay there
+#
+# FAN_PROFILE picks which ENTER/EXIT/SPEEDS set to use — it's the only
+# thing that trades noise for headroom. PANIC_C is deliberately NOT part of
+# a profile: it's the hardware safety ceiling, not a comfort preference, so
+# it stays the same no matter which profile is picked.
+FAN_PROFILE="${FAN_PROFILE:-balanced}"
+case "$FAN_PROFILE" in
+  silent)
+    # Quietest. Runs warmer within each tier before ramping — fine as long
+    # as your components' actual thermal limits leave margin for it.
+    ENTER=(50 60 70 78)
+    EXIT=(45 55 65 73)
+    SPEEDS=(20 30 45 60 85)
+    ;;
+  balanced)
+    ENTER=(45 55 65 75)
+    EXIT=(40 50 60 70)
+    SPEEDS=(30 40 55 70 90)
+    ;;
+  performance)
+    # Ramps sooner and harder to keep temps lower, at the cost of more fan
+    # noise even at idle-ish loads.
+    ENTER=(38 46 54 65)
+    EXIT=(33 41 49 60)
+    SPEEDS=(40 55 70 85 100)
+    ;;
+  *)
+    echo "fan-noise-guard: unknown FAN_PROFILE '${FAN_PROFILE}' (expected: silent, balanced, performance)" >&2
+    exit 1
+    ;;
+esac
+PANIC_C=82   # hard ceiling: bail to automatic control and stay there, regardless of profile
 
 last_speed=-1
 tier=0   # index into SPEEDS; current committed tier (persists across polls)
@@ -140,7 +168,7 @@ on_signal() {
 }
 trap on_signal INT TERM
 
-log "starting (dry_run=${DRY_RUN}): poll=${POLL_INTERVAL}s enter=${ENTER[*]} exit=${EXIT[*]} speeds=${SPEEDS[*]} panic=${PANIC_C}C"
+log "starting (profile=${FAN_PROFILE} dry_run=${DRY_RUN}): poll=${POLL_INTERVAL}s enter=${ENTER[*]} exit=${EXIT[*]} speeds=${SPEEDS[*]} panic=${PANIC_C}C"
 
 while true; do
   gpu=$(read_gpu_temp)
