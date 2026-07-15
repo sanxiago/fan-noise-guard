@@ -120,6 +120,40 @@ limits (`sensors` reports `high`/`crit` values for CPU packages; GPU vendors
 publish throttle/max operating temperatures) and set `PANIC_C` comfortably
 below them.
 
+## Statistics mode
+
+The hand-picked `ENTER`/`EXIT`/`SPEEDS` tiers above are a *bang-bang
+controller with hysteresis* — simple and robust, but it can get stuck: a
+tier's exit threshold may simply be unreachable at that fan speed for your
+specific hardware (this happened during development — a profile's exit
+target sat 3°C below what the GPU could actually reach at that speed, so it
+never stepped back down, even though nothing was malfunctioning).
+
+Set `STATS_FILE` to log one CSV row per poll — temperature, GPU
+utilization/power draw (leading indicators of heat generation, available
+*before* temperature itself moves), CPU load, and the actual fan RPM read
+back from the BMC (ground truth, not just the speed requested):
+
+```bash
+STATS_FILE=/var/log/fan-noise-guard/stats.csv ./fan-noise-guard.sh
+```
+
+or via the same `/etc/default/fan-noise-guard` environment file used for
+`FAN_PROFILE`. It's pure observability — a broken stats write only disables
+stats logging for that run (one warning, then silent) and never affects a
+fan control decision.
+
+Columns: `ts,profile,panicked,gpu_temp_c,cpu_temp_c,gpu_util_pct,gpu_power_w,load1,tier,target_fan_pct,fan_rpm_avg`
+
+This data is meant for offline analysis, not just record-keeping — it's
+what you'd need for actual system identification if you want to graduate
+past hand-tuned tiers to a closed-loop controller (e.g. PID on temperature
+error, with power draw as a feedforward term). Notably: you don't need to
+measure ambient room temperature to compensate for it. A feedback
+controller reacting to the measured component temperature corrects for
+*any* disturbance that shows up in that reading — room temp, dust buildup,
+airflow changes — without needing to know which one it was.
+
 ## Safety notes
 
 - **This modifies real fan control on a physical server.** Manual IPMI fan

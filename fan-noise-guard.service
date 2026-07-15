@@ -4,9 +4,12 @@ After=multi-user.target
 
 [Service]
 Type=simple
-# Optional: create /etc/default/fan-noise-guard with e.g. FAN_PROFILE=silent
-# to override the default "balanced" profile without editing this unit.
-# Leading "-" means a missing file is not an error.
+# Optional: create /etc/default/fan-noise-guard with e.g.
+#   FAN_PROFILE=silent
+#   STATS_FILE=/var/log/fan-noise-guard/stats.csv
+# to override the default profile and/or enable CSV telemetry logging,
+# without editing this unit. Leading "-" means a missing file is not an
+# error.
 EnvironmentFile=-/etc/default/fan-noise-guard
 # Elevated scheduling priority (lower/negative nice = higher priority) so the
 # watchdog keeps polling and can still issue IPMI fan commands promptly even

@@ -35,6 +35,18 @@ READ_TIMEOUT=5         # max seconds to wait on nvidia-smi/sensors before treati
 LOG_TAG="fan-noise-guard"
 DRY_RUN="${DRY_RUN:-0}"   # DRY_RUN=1 ./fan-noise-guard.sh: log decisions, never touch fans
 
+# STATS_FILE=/path/to/stats.csv ./fan-noise-guard.sh: append one CSV row per
+# poll with everything we can measure — temps, GPU load/power (leading
+# indicators of heat generation, available before temperature itself moves),
+# and the *actual* fan RPM read back from the BMC (ground truth, not just
+# the speed we requested). This is deliberately not used for any control
+# decision — it's pure observability, meant as system-identification data
+# for evaluating/retuning profiles later. Unset (default) disables it
+# entirely with zero overhead.
+STATS_FILE="${STATS_FILE:-}"
+STATS_HEADER="ts,profile,panicked,gpu_temp_c,cpu_temp_c,gpu_util_pct,gpu_power_w,load1,tier,target_fan_pct,fan_rpm_avg"
+stats_warned=0
+
 # temp (°C) -> fan speed (%) tiers, evaluated on max(cpu_package, gpu).
 # ENTER[i] is the temp at/above which we escalate from tier i to tier i+1.
 # EXIT[i] is the temp at/below which we may drop back from tier i+1 to tier
@@ -104,6 +116,55 @@ read_cpu_temp() {
   ' | sort -rn | head -n1 | cut -d. -f1
 }
 
+# --- Stats-mode telemetry readers -------------------------------------
+# All of these are best-effort and MUST NOT affect control decisions: they
+# set `stat_*` globals to blank on any failure instead of erroring, unlike
+# the safety-critical read_gpu_temp/read_cpu_temp above. A broken telemetry
+# read should never trigger emergency_response — it isn't part of the thing
+# keeping the hardware safe, just a bystander recording it.
+
+read_gpu_extra() {
+  local out
+  out=$(timeout "$READ_TIMEOUT" nvidia-smi --query-gpu=utilization.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null | head -n1)
+  stat_gpu_util="$(cut -d',' -f1 <<< "$out" | tr -d ' ')"
+  stat_gpu_power="$(cut -d',' -f2 <<< "$out" | tr -d ' ')"
+}
+
+read_load1() {
+  cut -d' ' -f1 /proc/loadavg 2>/dev/null
+}
+
+# Average RPM across every "Fan*" SDR entry iDRAC reports — the actual
+# physical result, as opposed to the percentage we asked for. Useful since
+# speed(%) -> RPM -> airflow -> cooling is not necessarily linear.
+read_fan_rpm_avg() {
+  timeout "$READ_TIMEOUT" "$IPMI" sdr type fan 2>/dev/null | awk -F'|' '
+    {
+      gsub(/^[ \t]+|[ \t]+$/, "", $5)
+      split($5, a, " ")
+      if (a[1] ~ /^[0-9]+$/) { sum += a[1]; n++ }
+    }
+    END { if (n > 0) printf "%.0f", sum / n }
+  '
+}
+
+log_stats() {
+  [[ -z "$STATS_FILE" ]] && return 0
+  [[ "$stats_warned" -eq 1 ]] && return 0   # already gave up this run, don't keep retrying every poll
+  if [[ ! -f "$STATS_FILE" ]] && ! ( echo "$STATS_HEADER" > "$STATS_FILE" ) 2>/dev/null; then
+    log "WARNING: cannot write STATS_FILE='${STATS_FILE}' (permissions? missing directory?) — stats logging disabled for this run"
+    stats_warned=1
+    return 0
+  fi
+  read_gpu_extra
+  local load1 fanrpm fan_field
+  load1=$(read_load1)
+  fanrpm=$(read_fan_rpm_avg)
+  fan_field="$last_speed"
+  [[ "$panicked" -eq 1 ]] && fan_field="auto"
+  echo "$(date -Iseconds),${FAN_PROFILE},${panicked},${gpu:-},${cpu:-},${stat_gpu_util:-},${stat_gpu_power:-},${load1:-},${tier},${fan_field},${fanrpm:-}" >> "$STATS_FILE" 2>/dev/null
+}
+
 set_manual_speed() {
   local pct="$1" hex
   hex=$(printf '0x%02x' "$pct")
@@ -168,7 +229,7 @@ on_signal() {
 }
 trap on_signal INT TERM
 
-log "starting (profile=${FAN_PROFILE} dry_run=${DRY_RUN}): poll=${POLL_INTERVAL}s enter=${ENTER[*]} exit=${EXIT[*]} speeds=${SPEEDS[*]} panic=${PANIC_C}C"
+log "starting (profile=${FAN_PROFILE} dry_run=${DRY_RUN} stats_file=${STATS_FILE:-disabled}): poll=${POLL_INTERVAL}s enter=${ENTER[*]} exit=${EXIT[*]} speeds=${SPEEDS[*]} panic=${PANIC_C}C"
 
 while true; do
   gpu=$(read_gpu_temp)
@@ -201,6 +262,8 @@ while true; do
       log "still in PANIC/automatic-control state; restart the service to re-arm manual control"
     fi
   fi
+
+  log_stats
 
   sleep "$POLL_INTERVAL"
 done
