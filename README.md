@@ -130,9 +130,10 @@ target sat 3°C below what the GPU could actually reach at that speed, so it
 never stepped back down, even though nothing was malfunctioning).
 
 Set `STATS_FILE` to log one CSV row per poll — temperature, GPU
-utilization/power draw (leading indicators of heat generation, available
-*before* temperature itself moves), CPU load, and the actual fan RPM read
-back from the BMC (ground truth, not just the speed requested):
+utilization/power draw, whole-chassis power draw (leading indicators of heat
+generation, available *before* temperature itself moves), CPU load, and the
+actual fan RPM read back from the BMC (ground truth, not just the speed
+requested):
 
 ```bash
 STATS_FILE=/var/log/fan-noise-guard/stats.csv ./fan-noise-guard.sh
@@ -143,7 +144,10 @@ or via the same `/etc/default/fan-noise-guard` environment file used for
 stats logging for that run (one warning, then silent) and never affects a
 fan control decision.
 
-Columns: `ts,profile,panicked,gpu_temp_c,cpu_temp_c,gpu_util_pct,gpu_power_w,load1,tier,target_fan_pct,fan_rpm_avg`
+Columns: `ts,profile,panicked,gpu_temp_c,cpu_temp_c,gpu_util_pct,gpu_power_w,chassis_power_w,load1,tier,target_fan_pct,fan_rpm_avg`
+
+`chassis_power_w` is the whole-system draw at the PSU (via the BMC's DCMI
+sensor) — it already includes `gpu_power_w`, the two are not additive.
 
 This data is meant for offline analysis, not just record-keeping — it's
 what you'd need for actual system identification if you want to graduate

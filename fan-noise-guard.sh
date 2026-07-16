@@ -36,15 +36,15 @@ LOG_TAG="fan-noise-guard"
 DRY_RUN="${DRY_RUN:-0}"   # DRY_RUN=1 ./fan-noise-guard.sh: log decisions, never touch fans
 
 # STATS_FILE=/path/to/stats.csv ./fan-noise-guard.sh: append one CSV row per
-# poll with everything we can measure — temps, GPU load/power (leading
-# indicators of heat generation, available before temperature itself moves),
-# and the *actual* fan RPM read back from the BMC (ground truth, not just
-# the speed we requested). This is deliberately not used for any control
-# decision — it's pure observability, meant as system-identification data
-# for evaluating/retuning profiles later. Unset (default) disables it
-# entirely with zero overhead.
+# poll with everything we can measure — temps, GPU load/power, whole-chassis
+# power draw (leading indicators of heat generation, available before
+# temperature itself moves), and the *actual* fan RPM read back from the BMC
+# (ground truth, not just the speed we requested). This is deliberately not
+# used for any control decision — it's pure observability, meant as
+# system-identification data for evaluating/retuning profiles later. Unset
+# (default) disables it entirely with zero overhead.
 STATS_FILE="${STATS_FILE:-}"
-STATS_HEADER="ts,profile,panicked,gpu_temp_c,cpu_temp_c,gpu_util_pct,gpu_power_w,load1,tier,target_fan_pct,fan_rpm_avg"
+STATS_HEADER="ts,profile,panicked,gpu_temp_c,cpu_temp_c,gpu_util_pct,gpu_power_w,chassis_power_w,load1,tier,target_fan_pct,fan_rpm_avg"
 stats_warned=0
 
 # temp (°C) -> fan speed (%) tiers, evaluated on max(cpu_package, gpu).
@@ -141,6 +141,15 @@ read_load1() {
   cut -d' ' -f1 /proc/loadavg 2>/dev/null
 }
 
+# Whole-system power draw at the PSU, via the BMC's DCMI sensor — this
+# already includes the GPU (and everything else), it is not additive with
+# gpu_power_w above.
+read_chassis_power() {
+  timeout "$READ_TIMEOUT" "$IPMI" dcmi power reading 2>/dev/null | awk '
+    /Instantaneous power reading/ { gsub(/[^0-9]/, "", $4); print $4 }
+  '
+}
+
 # Average RPM across every "Fan*" SDR entry iDRAC reports — the actual
 # physical result, as opposed to the percentage we asked for. Useful since
 # speed(%) -> RPM -> airflow -> cooling is not necessarily linear.
@@ -164,12 +173,13 @@ log_stats() {
     return 0
   fi
   read_gpu_extra
-  local load1 fanrpm fan_field
+  local load1 fanrpm fan_field chassis_power
   load1=$(read_load1)
   fanrpm=$(read_fan_rpm_avg)
+  chassis_power=$(read_chassis_power)
   fan_field="$last_speed"
   [[ "$panicked" -eq 1 ]] && fan_field="auto"
-  echo "$(date -Iseconds),${FAN_PROFILE},${panicked},${gpu:-},${cpu:-},${stat_gpu_util:-},${stat_gpu_power:-},${load1:-},${tier},${fan_field},${fanrpm:-}" >> "$STATS_FILE" 2>/dev/null
+  echo "$(date -Iseconds),${FAN_PROFILE},${panicked},${gpu:-},${cpu:-},${stat_gpu_util:-},${stat_gpu_power:-},${chassis_power:-},${load1:-},${tier},${fan_field},${fanrpm:-}" >> "$STATS_FILE" 2>/dev/null
 }
 
 set_manual_speed() {
